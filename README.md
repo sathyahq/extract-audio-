@@ -1,6 +1,6 @@
 # Audio File Scanner
 
-Scans a root folder of audio files organized by **job address** subfolders. Totals the duration of all audio files (`.mp3`, `.wav`, `.m4a`, `.flac`) per job and writes a clean 3-column CSV.
+Scans a root folder of audio files organized by **job address** subfolders. Totals the duration of all audio files (`.mp3`, `.wav`, `.m4a`, `.flac`) per job and writes a **monthly CSV** — one file per month, automatically.
 
 ## Folder structure expected
 
@@ -17,7 +17,7 @@ Audio Jobs/
         └── full_session.wav
 ```
 
-Each **subfolder name** = the job address.
+Each **subfolder name** = the job address. Audio files inside are **never renamed or moved**.
 
 ## Setup
 
@@ -41,7 +41,7 @@ Open `extract_audio.py` and edit the variables at the top:
 
 ```python
 AUDIO_FOLDER = Path.home() / "Music"   # root folder with job-address subfolders
-OUTPUT_CSV   = Path("audio_index.csv") # output CSV path
+OUTPUT_DIR   = Path(".")               # where monthly CSVs are saved
 EXPORT_EXCEL = False                   # set True for .xlsx export
 ```
 
@@ -62,27 +62,50 @@ python extract_audio.py
 
 ## Output
 
-### `audio_index.csv`
+### Monthly CSV files
 
-| Date_Received | Job_Address       | Total_Duration |
-|---------------|-------------------|----------------|
-| 2026-01-15    | 123 Main Street   | 12:45          |
-| 2026-02-03    | 456 Oak Avenue    | 08:22          |
-| 2026-02-10    | 789 Pine Road     | 45:30          |
-|               | ** GRAND TOTAL ** | 01:06:37       |
+The script creates one CSV per month, named automatically:
+
+```
+audio_index_2026-01.csv
+audio_index_2026-02.csv
+audio_index_2026-03.csv
+...
+```
+
+Each file contains:
+
+| Date_Received | Job_Address          | Total_Duration |
+|---------------|----------------------|----------------|
+| 2026-02-03    | 123 Main Street      | 12:45          |
+| 2026-02-10    | 456 Oak Avenue       | 08:22          |
+|               | ** TOTAL 2026-02 **  | 21:07          |
 
 ### Console output
 
 ```
-────────────────────────────────────────────────────────────────
-DATE           JOB ADDRESS                        TOTAL DURATION
-────────────────────────────────────────────────────────────────
-2026-01-15     123 Main Street                          12:45
-2026-02-03     456 Oak Avenue                            08:22
-2026-02-10     789 Pine Road                             45:30
-────────────────────────────────────────────────────────────────
-               GRAND TOTAL                            01:06:37
-────────────────────────────────────────────────────────────────
+  Month: 2026-01
+  ────────────────────────────────────────────────────────────────
+  DATE           JOB ADDRESS                        TOTAL DURATION
+  ────────────────────────────────────────────────────────────────
+  2026-01-15     789 Pine Road                            45:30
+  ────────────────────────────────────────────────────────────────
+                 MONTH TOTAL                               45:30
+  ────────────────────────────────────────────────────────────────
+
+  Month: 2026-02
+  ────────────────────────────────────────────────────────────────
+  DATE           JOB ADDRESS                        TOTAL DURATION
+  ────────────────────────────────────────────────────────────────
+  2026-02-03     123 Main Street                          12:45
+  2026-02-10     456 Oak Avenue                            08:22
+  ────────────────────────────────────────────────────────────────
+                 MONTH TOTAL                               21:07
+  ────────────────────────────────────────────────────────────────
+
+  ════════════════════════════════════════════════════════════════
+  GRAND TOTAL                                       3 job(s)   01:06:37
+  ════════════════════════════════════════════════════════════════
 ```
 
 ### `processing_log.txt`
@@ -91,11 +114,13 @@ A timestamped log of every run — individual file durations, skipped files, and
 
 ## Features
 
+- **Month-wise CSVs** — one file per month, created automatically based on folder dates.
 - **3-column output** — Date Received, Job Address, Total Duration (MM:SS or HH:MM:SS).
-- **Grouped by job** — each subfolder is treated as one job address; all audio durations inside are summed.
-- **Duplicate detection** — jobs already in the CSV are not re-processed.
+- **Read-only** — audio files are never renamed, moved, or modified.
+- **Grouped by job** — each subfolder = one job address; all audio durations inside are summed.
+- **Duplicate detection** — jobs already in any CSV are not re-processed.
 - **Error handling** — corrupted or unreadable files are logged and skipped.
 - **Append mode** — re-running adds only new jobs; existing rows are preserved.
 - **Date auto-detection** — uses the folder's creation/modification date as Date_Received.
 - **Cross-platform** — uses `pathlib`; no hardcoded OS paths.
-- **Excel export** — set `EXPORT_EXCEL = True` to also write `audio_index.xlsx`.
+- **Excel export** — set `EXPORT_EXCEL = True` to also write `.xlsx` versions.
