@@ -2,6 +2,43 @@
 
 Scans a root folder of audio files organized by **job address** subfolders. Totals the duration of all audio files (`.mp3`, `.wav`, `.m4a`, `.flac`) per job and writes a **monthly CSV** — one file per month, automatically.
 
+---
+
+## Quick Start (non-techie friendly)
+
+You only need **one thing** installed: **Python** (free).
+
+### Step 1 — Install Python
+
+| Your Computer | How to install Python |
+|---------------|----------------------|
+| **Windows**   | Go to [python.org/downloads](https://www.python.org/downloads/), click the big yellow **"Download Python"** button, run the installer. **Check the box "Add Python to PATH"** before clicking Install. |
+| **Mac**       | Go to [python.org/downloads](https://www.python.org/downloads/) and download the macOS installer. Or if you have Homebrew: `brew install python3` |
+
+### Step 2 — Set your audio folder
+
+Open `extract_audio.py` in any text editor (Notepad, TextEdit, etc.) and change line 39 to point to your folder:
+
+```python
+AUDIO_FOLDER = Path.home() / "Music"   # change "Music" to your folder name
+```
+
+For example, if your audio jobs are in `C:\Users\YourName\Documents\Audio Jobs`:
+```python
+AUDIO_FOLDER = Path.home() / "Documents" / "Audio Jobs"
+```
+
+### Step 3 — Run it (one click)
+
+| Your Computer | What to do |
+|---------------|------------|
+| **Windows**   | Double-click **`setup_and_run.bat`** |
+| **Mac/Linux** | Double-click **`setup_and_run.sh`** (or open Terminal, drag the file in, press Enter) |
+
+The launcher handles everything automatically — installs packages, runs the scanner, and shows your results. Your CSV files will appear in the same folder.
+
+---
+
 ## Folder structure expected
 
 ```
