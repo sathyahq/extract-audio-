@@ -1,6 +1,23 @@
 # Audio File Scanner
 
-Scans a desktop folder for audio files (`.mp3`, `.wav`, `.m4a`, `.flac`), extracts metadata (title, duration, file size), and writes the results to a CSV table. Optionally exports to Excel.
+Scans a root folder of audio files organized by **job address** subfolders. Totals the duration of all audio files (`.mp3`, `.wav`, `.m4a`, `.flac`) per job and writes a clean 3-column CSV.
+
+## Folder structure expected
+
+```
+Audio Jobs/
+  ├── 123 Main Street/
+  │     ├── recording1.m4a
+  │     ├── recording2.m4a
+  │     └── recording3.m4a
+  ├── 456 Oak Avenue/
+  │     ├── part1.mp3
+  │     └── part2.mp3
+  └── 789 Pine Road/
+        └── full_session.wav
+```
+
+Each **subfolder name** = the job address.
 
 ## Setup
 
@@ -23,7 +40,7 @@ pip install -r requirements.txt
 Open `extract_audio.py` and edit the variables at the top:
 
 ```python
-AUDIO_FOLDER = Path.home() / "Music"   # folder to scan
+AUDIO_FOLDER = Path.home() / "Music"   # root folder with job-address subfolders
 OUTPUT_CSV   = Path("audio_index.csv") # output CSV path
 EXPORT_EXCEL = False                   # set True for .xlsx export
 ```
@@ -47,19 +64,38 @@ python extract_audio.py
 
 ### `audio_index.csv`
 
-| Title | Filename | Duration_Seconds | Duration_Minutes | Duration_Formatted | Full_File_Path | File_Size_MB | Date_Processed |
-|-------|----------|------------------|------------------|--------------------|----------------|--------------|----------------|
-| song1 | song1.mp3 | 245.67 | 4.09 | 04:06 | /home/user/Music/song1.mp3 | 5.82 | 2026-02-16 10:30:00 |
-| track | track.flac | 312.44 | 5.21 | 05:12 | /home/user/Music/track.flac | 32.10 | 2026-02-16 10:30:00 |
+| Date_Received | Job_Address       | Total_Duration |
+|---------------|-------------------|----------------|
+| 2026-01-15    | 123 Main Street   | 12:45          |
+| 2026-02-03    | 456 Oak Avenue    | 08:22          |
+| 2026-02-10    | 789 Pine Road     | 45:30          |
+|               | ** GRAND TOTAL ** | 01:06:37       |
+
+### Console output
+
+```
+────────────────────────────────────────────────────────────────
+DATE           JOB ADDRESS                        TOTAL DURATION
+────────────────────────────────────────────────────────────────
+2026-01-15     123 Main Street                          12:45
+2026-02-03     456 Oak Avenue                            08:22
+2026-02-10     789 Pine Road                             45:30
+────────────────────────────────────────────────────────────────
+               GRAND TOTAL                            01:06:37
+────────────────────────────────────────────────────────────────
+```
 
 ### `processing_log.txt`
 
-A timestamped log of every run — files processed, duplicates skipped, and errors encountered.
+A timestamped log of every run — individual file durations, skipped files, and errors.
 
 ## Features
 
-- **Duplicate detection** — files already in the CSV (matched by full path) are skipped.
+- **3-column output** — Date Received, Job Address, Total Duration (MM:SS or HH:MM:SS).
+- **Grouped by job** — each subfolder is treated as one job address; all audio durations inside are summed.
+- **Duplicate detection** — jobs already in the CSV are not re-processed.
 - **Error handling** — corrupted or unreadable files are logged and skipped.
-- **Append mode** — re-running the script adds only new files; existing rows are preserved.
-- **Cross-platform** — uses `pathlib` throughout; no hardcoded OS paths.
-- **Excel export** — set `EXPORT_EXCEL = True` and the script writes `audio_index.xlsx` alongside the CSV.
+- **Append mode** — re-running adds only new jobs; existing rows are preserved.
+- **Date auto-detection** — uses the folder's creation/modification date as Date_Received.
+- **Cross-platform** — uses `pathlib`; no hardcoded OS paths.
+- **Excel export** — set `EXPORT_EXCEL = True` to also write `audio_index.xlsx`.

@@ -1,15 +1,21 @@
 #!/usr/bin/env python3
 """
-Desktop Audio File Scanner
-Scans a folder for audio files, extracts metadata (filename, duration, size),
-and appends structured data into a CSV table. Optionally exports to Excel.
+Audio File Scanner — Total duration per Job Address
+
+Scans a root folder containing subfolders (one per job address).
+Each subfolder holds audio files (.mp3, .wav, .m4a, .flac).
+
+Outputs:
+  - audio_index.csv       3-column table: Date_Received | Job_Address | Total_Duration
+  - processing_log.txt    timestamped run log
+  - (optional) audio_index.xlsx
 """
 
 import csv
 import logging
-import os
 import platform
 import sys
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
@@ -26,32 +32,29 @@ except ImportError:
 # ──────────────────────────────────────────────
 # CONFIGURATION — edit these values as needed
 # ──────────────────────────────────────────────
-AUDIO_FOLDER = Path.home() / "Music"  # <-- change this to your target folder
+AUDIO_FOLDER = Path.home() / "Music"  # <-- root folder containing job-address subfolders
 OUTPUT_CSV = Path("audio_index.csv")
 LOG_FILE = Path("processing_log.txt")
-EXPORT_EXCEL = False  # set True to also write audio_index.xlsx
+EXPORT_EXCEL = False  # set True to also produce .xlsx
 
 SUPPORTED_EXTENSIONS = {".mp3", ".wav", ".m4a", ".flac"}
 
 CSV_COLUMNS = [
-    "Title",
-    "Filename",
-    "Duration_Seconds",
-    "Duration_Minutes",
-    "Duration_Formatted",
-    "Full_File_Path",
-    "File_Size_MB",
-    "Date_Processed",
+    "Date_Received",
+    "Job_Address",
+    "Total_Duration",
 ]
 
 
 # ──────────────────────────────────────────────
-# Logging setup
+# Logging
 # ──────────────────────────────────────────────
 def setup_logging(log_path: Path) -> logging.Logger:
     """Configure a logger that writes to both console and a log file."""
     logger = logging.getLogger("audio_scanner")
     logger.setLevel(logging.INFO)
+    if logger.handlers:
+        return logger
 
     fmt = logging.Formatter("%(asctime)s  %(levelname)-8s  %(message)s",
                             datefmt="%Y-%m-%d %H:%M:%S")
@@ -71,7 +74,7 @@ def setup_logging(log_path: Path) -> logging.Logger:
 # Audio helpers
 # ──────────────────────────────────────────────
 def get_audio_duration(file_path: Path) -> float | None:
-    """Return the duration in seconds using mutagen, or None on failure."""
+    """Return duration in seconds using mutagen, or None on failure."""
     try:
         audio = MutagenFile(str(file_path))
         if audio is None or audio.info is None:
@@ -82,60 +85,109 @@ def get_audio_duration(file_path: Path) -> float | None:
 
 
 def format_duration(seconds: float) -> str:
-    """Convert seconds to MM:SS string."""
+    """Convert seconds → MM:SS (or HH:MM:SS if >= 1 hour)."""
     total = int(round(seconds))
-    minutes, secs = divmod(total, 60)
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours > 0:
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
     return f"{minutes:02d}:{secs:02d}"
 
 
-def file_size_mb(file_path: Path) -> float:
-    """Return the file size in megabytes, rounded to 2 decimals."""
-    return round(file_path.stat().st_size / (1024 * 1024), 2)
+def get_folder_date(folder: Path) -> str:
+    """
+    Get the date the job folder was received.
+    Uses the folder's creation time (or earliest modification time).
+    """
+    stat = folder.stat()
+    # st_birthtime exists on macOS; fall back to st_mtime elsewhere
+    timestamp = getattr(stat, "st_birthtime", None) or stat.st_mtime
+    return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d")
 
 
 # ──────────────────────────────────────────────
 # File discovery
 # ──────────────────────────────────────────────
-def find_audio_files(folder: Path) -> list[Path]:
-    """Return a sorted list of supported audio files in *folder*."""
-    files = [
-        p for p in folder.iterdir()
-        if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS
-    ]
-    files.sort(key=lambda p: p.name.lower())
-    return files
+def discover_jobs(root: Path) -> dict[str, list[Path]]:
+    """
+    Walk *root* and group audio files by job address.
+
+    Structure expected:
+        root/
+          Job Address A/
+            file1.m4a
+            file2.m4a
+          Job Address B/
+            file3.mp3
+
+    If audio files sit directly in *root* (no subfolders), they are
+    grouped under a single job called the root folder name.
+    """
+    jobs: dict[str, list[Path]] = defaultdict(list)
+
+    # Files directly in the root folder
+    for p in sorted(root.iterdir(), key=lambda x: x.name.lower()):
+        if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS:
+            jobs[root.name].append(p)
+
+    # Subfolders = job addresses
+    for subfolder in sorted(root.iterdir(), key=lambda x: x.name.lower()):
+        if not subfolder.is_dir():
+            continue
+        files = sorted(
+            [f for f in subfolder.rglob("*")
+             if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS],
+            key=lambda x: x.name.lower(),
+        )
+        if files:
+            jobs[subfolder.name] = files
+
+    return dict(jobs)
 
 
 # ──────────────────────────────────────────────
-# CSV / duplicate handling
+# CSV helpers
 # ──────────────────────────────────────────────
-def load_existing_paths(csv_path: Path) -> set[str]:
-    """Read the CSV and return a set of Full_File_Path values already stored."""
-    paths: set[str] = set()
+def load_existing_jobs(csv_path: Path) -> set[str]:
+    """Return Job_Address values already in the CSV."""
+    addresses: set[str] = set()
     if not csv_path.exists():
-        return paths
+        return addresses
     with csv_path.open(newline="", encoding="utf-8") as fh:
         reader = csv.DictReader(fh)
         for row in reader:
-            paths.add(row["Full_File_Path"])
-    return paths
+            val = row.get("Job_Address", "")
+            if val and val != "** GRAND TOTAL **":
+                addresses.add(val)
+    return addresses
 
 
-def append_rows(csv_path: Path, rows: list[dict]) -> None:
-    """Append *rows* to the CSV, creating it with headers if needed."""
-    file_exists = csv_path.exists()
-    with csv_path.open("a", newline="", encoding="utf-8") as fh:
+def write_csv(csv_path: Path, rows: list[dict]) -> None:
+    """Write (overwrite) a CSV with the 3-column layout + grand total."""
+    with csv_path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=CSV_COLUMNS)
-        if not file_exists:
-            writer.writeheader()
+        writer.writeheader()
         writer.writerows(rows)
+
+
+def read_existing_rows(csv_path: Path) -> list[dict]:
+    """Read all non-total rows from the existing CSV."""
+    rows: list[dict] = []
+    if not csv_path.exists():
+        return rows
+    with csv_path.open(newline="", encoding="utf-8") as fh:
+        reader = csv.DictReader(fh)
+        for row in reader:
+            if row.get("Job_Address") != "** GRAND TOTAL **":
+                rows.append(row)
+    return rows
 
 
 # ──────────────────────────────────────────────
 # Excel export
 # ──────────────────────────────────────────────
 def export_to_excel(csv_path: Path) -> Path:
-    """Read the CSV with pandas and write an .xlsx copy next to it."""
+    """Read the CSV and write an .xlsx copy next to it."""
     xlsx_path = csv_path.with_suffix(".xlsx")
     df = pd.read_csv(csv_path)
     try:
@@ -149,80 +201,118 @@ def export_to_excel(csv_path: Path) -> Path:
 
 
 # ──────────────────────────────────────────────
+# Console report
+# ──────────────────────────────────────────────
+def print_report(rows: list[dict], grand_total_secs: float) -> None:
+    """Print a clean summary table to the console."""
+    sep = "─" * 64
+    print(f"\n{sep}")
+    print(f"{'DATE':<14} {'JOB ADDRESS':<34} {'TOTAL DURATION':>14}")
+    print(sep)
+    for r in rows:
+        print(f"{r['Date_Received']:<14} {r['Job_Address']:<34} {r['Total_Duration']:>14}")
+    print(sep)
+    print(f"{'':<14} {'GRAND TOTAL':<34} {format_duration(grand_total_secs):>14}")
+    print(f"{sep}\n")
+
+
+# ──────────────────────────────────────────────
 # Main processing
 # ──────────────────────────────────────────────
 def process_folder(
-    folder: Path,
+    root: Path,
     csv_path: Path,
     logger: logging.Logger,
     export_xlsx: bool = False,
 ) -> None:
-    """Scan *folder* for audio files, extract metadata, and update the CSV."""
+    """Scan *root* for job-address subfolders, sum durations, write CSV."""
     logger.info("OS detected: %s %s", platform.system(), platform.release())
     logger.info("Python version: %s", sys.version.split()[0])
-    logger.info("Scanning folder: %s", folder)
+    logger.info("Scanning root folder: %s", root)
 
-    if not folder.is_dir():
-        logger.error("Folder does not exist or is not a directory: %s", folder)
+    if not root.is_dir():
+        logger.error("Folder does not exist: %s", root)
         return
 
-    audio_files = find_audio_files(folder)
-    logger.info("Found %d audio file(s) with supported extensions", len(audio_files))
-
-    if not audio_files:
-        logger.info("Nothing to process — exiting.")
+    jobs = discover_jobs(root)
+    if not jobs:
+        logger.info("No audio files found — exiting.")
         return
 
-    existing_paths = load_existing_paths(csv_path)
+    logger.info("Found %d job address(es)", len(jobs))
+
+    # Load existing data so we can append without duplicates
+    existing_rows = read_existing_rows(csv_path)
+    existing_job_names = {r["Job_Address"] for r in existing_rows}
+
     new_rows: list[dict] = []
-    skipped = 0
-    duplicates = 0
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    grand_total_secs = 0.0
+    total_skipped = 0
 
-    for fp in audio_files:
-        full_path_str = str(fp.resolve())
-
-        # Duplicate check
-        if full_path_str in existing_paths:
-            logger.info("Skipping duplicate: %s", fp.name)
-            duplicates += 1
+    for job_address, files in jobs.items():
+        if job_address in existing_job_names:
+            logger.info("Job already in CSV, skipping: %s", job_address)
             continue
 
-        # Duration extraction
-        duration = get_audio_duration(fp)
-        if duration is None:
-            logger.warning("Could not read audio data — skipped: %s", fp.name)
-            skipped += 1
-            continue
+        logger.info("Processing job: %s  (%d audio files)", job_address, len(files))
+        job_secs = 0.0
 
-        row = {
-            "Title": fp.stem,
-            "Filename": fp.name,
-            "Duration_Seconds": round(duration, 2),
-            "Duration_Minutes": round(duration / 60, 2),
-            "Duration_Formatted": format_duration(duration),
-            "Full_File_Path": full_path_str,
-            "File_Size_MB": file_size_mb(fp),
-            "Date_Processed": now,
-        }
-        new_rows.append(row)
+        # Determine the job folder for date detection
+        if files:
+            job_folder = files[0].parent
+        else:
+            job_folder = root
 
-    # Write results
-    if new_rows:
-        append_rows(csv_path, new_rows)
-        logger.info("Appended %d new row(s) to %s", len(new_rows), csv_path)
-    else:
-        logger.info("No new files to add.")
+        for fp in files:
+            duration = get_audio_duration(fp)
+            if duration is None:
+                logger.warning("  Unreadable — skipped: %s", fp.name)
+                total_skipped += 1
+                continue
+            job_secs += duration
+            logger.info("  %s  →  %s", fp.name, format_duration(duration))
 
-    logger.info(
-        "Summary — processed: %d, duplicates skipped: %d, errors skipped: %d",
-        len(new_rows), duplicates, skipped,
-    )
+        if job_secs > 0:
+            row = {
+                "Date_Received": get_folder_date(job_folder),
+                "Job_Address": job_address,
+                "Total_Duration": format_duration(job_secs),
+            }
+            new_rows.append(row)
+            grand_total_secs += job_secs
 
-    if export_xlsx:
-        if csv_path.exists():
-            xlsx = export_to_excel(csv_path)
-            logger.info("Excel export written to %s", xlsx)
+    # Merge old + new rows, recalculate grand total
+    all_rows = existing_rows + new_rows
+
+    # Recalculate grand total from ALL rows (old + new)
+    def duration_to_secs(d: str) -> int:
+        parts = d.split(":")
+        if len(parts) == 3:
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+        return int(parts[0]) * 60 + int(parts[1])
+
+    total_secs = sum(duration_to_secs(r["Total_Duration"]) for r in all_rows)
+
+    # Grand total row
+    grand_row = {
+        "Date_Received": "",
+        "Job_Address": "** GRAND TOTAL **",
+        "Total_Duration": format_duration(total_secs),
+    }
+
+    write_csv(csv_path, all_rows + [grand_row])
+    logger.info("CSV written to %s  (%d job(s), %d new)", csv_path, len(all_rows), len(new_rows))
+
+    if total_skipped:
+        logger.warning("Skipped %d unreadable file(s) — see log for details", total_skipped)
+
+    # Console report
+    if all_rows:
+        print_report(all_rows, total_secs)
+
+    # Optional Excel export
+    if export_xlsx and csv_path.exists():
+        logger.info("Excel export → %s", export_to_excel(csv_path))
 
 
 # ──────────────────────────────────────────────
