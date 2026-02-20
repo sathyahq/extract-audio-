@@ -129,6 +129,18 @@ def setup_logging(log_path: Path) -> logging.Logger:
 # ──────────────────────────────────────────────
 # Audio helpers
 # ──────────────────────────────────────────────
+def is_audio_candidate(file_path: Path) -> bool:
+    """Check if a file might be audio (by extension or by probing with mutagen)."""
+    if file_path.suffix.lower() in SUPPORTED_EXTENSIONS:
+        return True
+    # No recognized extension — let mutagen try to identify it
+    try:
+        audio = MutagenFile(str(file_path))
+        return audio is not None and audio.info is not None
+    except Exception:
+        return False
+
+
 def get_audio_duration(file_path: Path) -> float | None:
     """Return duration in seconds using mutagen, or None on failure."""
     try:
@@ -235,7 +247,7 @@ def scan_month_folder(month_folder: Path, logger: logging.Logger):
 
         loose_files = [
             f for f in day_path.iterdir()
-            if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS
+            if f.is_file() and is_audio_candidate(f)
         ]
 
         if not address_folders and not loose_files:
@@ -266,7 +278,7 @@ def scan_month_folder(month_folder: Path, logger: logging.Logger):
         for addr_folder in address_folders:
             audio_files = sorted(
                 [f for f in addr_folder.rglob("*")
-                 if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS],
+                 if f.is_file() and is_audio_candidate(f)],
                 key=lambda x: x.name.lower()
             )
 
