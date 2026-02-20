@@ -33,6 +33,14 @@ try:
 except ImportError:
     sys.exit("Error: 'mutagen' is not installed. Run: pip install mutagen")
 
+# Try to get bundled ffprobe path (auto-downloads on first run)
+FFPROBE_PATH = "ffprobe"  # default: assume on system PATH
+try:
+    import static_ffmpeg
+    static_ffmpeg.add_paths()
+except ImportError:
+    pass
+
 # ──────────────────────────────────────────────
 # CONFIGURATION
 # ──────────────────────────────────────────────
@@ -440,28 +448,12 @@ def print_report(results: list[dict], month_folder: Path):
 # ──────────────────────────────────────────────
 # Main
 # ──────────────────────────────────────────────
-def check_ffprobe() -> bool:
-    """Check if ffprobe (ffmpeg) is available on the system."""
-    try:
-        subprocess.run(["ffprobe", "-version"], capture_output=True, timeout=5)
-        return True
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return False
-
-
 def main():
     logger = setup_logging(LOG_FILE)
     logger.info("=" * 50)
     logger.info("Audio Scanner started")
     logger.info("OS: %s %s", platform.system(), platform.release())
     logger.info("Python: %s", sys.version.split()[0])
-
-    has_ffprobe = check_ffprobe()
-    if has_ffprobe:
-        logger.info("ffprobe: available (can read all audio formats)")
-    else:
-        logger.warning("ffprobe: NOT found. Some audio files (e.g. Express Scribe, dictation) may not be readable.")
-        logger.warning("Install ffmpeg from https://ffmpeg.org/download.html to fix this.")
 
     # Show popup to get folder path
     folder_path = ask_for_folder()

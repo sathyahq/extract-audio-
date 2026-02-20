@@ -50,26 +50,14 @@ REM Install dependencies if needed
 pip show mutagen >nul 2>&1
 if errorlevel 1 (
     echo  Installing required packages...
+    echo  (this includes ffmpeg — may take a minute on first run)
     pip install -r requirements.txt
     if errorlevel 1 (
         echo  [ERROR] Failed to install packages.
         pause
         exit /b 1
     )
-    echo  [OK] Packages installed.
-    echo.
-)
-
-REM Check if ffprobe (ffmpeg) is available for reading all audio formats
-ffprobe -version >nul 2>&1
-if errorlevel 1 (
-    echo  [NOTE] ffmpeg/ffprobe not found.
-    echo  Some audio files ^(Express Scribe, dictation^) may not be readable.
-    echo  To fix: download ffmpeg from https://ffmpeg.org/download.html
-    echo  and add it to your system PATH.
-    echo.
-) else (
-    echo  [OK] ffprobe found ^(all audio formats supported^).
+    echo  [OK] All packages installed.
     echo.
 )
 
