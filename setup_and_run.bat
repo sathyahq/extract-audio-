@@ -60,6 +60,19 @@ if errorlevel 1 (
     echo.
 )
 
+REM Check if ffprobe (ffmpeg) is available for reading all audio formats
+ffprobe -version >nul 2>&1
+if errorlevel 1 (
+    echo  [NOTE] ffmpeg/ffprobe not found.
+    echo  Some audio files ^(Express Scribe, dictation^) may not be readable.
+    echo  To fix: download ffmpeg from https://ffmpeg.org/download.html
+    echo  and add it to your system PATH.
+    echo.
+) else (
+    echo  [OK] ffprobe found ^(all audio formats supported^).
+    echo.
+)
+
 echo  Running Audio File Scanner...
 echo  ============================================
 echo.
