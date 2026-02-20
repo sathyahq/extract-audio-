@@ -1,5 +1,5 @@
 @echo off
-title Audio File Scanner — Setup and Run
+title Audio File Scanner
 echo.
 echo  ============================================
 echo   Audio File Scanner — One-Click Launcher
@@ -9,30 +9,21 @@ echo.
 REM Check if Python is installed
 python --version >nul 2>&1
 if errorlevel 1 (
-    echo  [ERROR] Python is not installed on this computer.
+    echo  [ERROR] Python is not installed.
     echo.
-    echo  Please download and install Python first:
-    echo.
-    echo     https://www.python.org/downloads/
-    echo.
-    echo  IMPORTANT: During installation, check the box that says:
-    echo     "Add Python to PATH"
-    echo.
-    echo  After installing Python, close this window and double-click
-    echo  this file again.
+    echo  Download from: https://www.python.org/downloads/
+    echo  IMPORTANT: Tick "Add Python to PATH" during install.
     echo.
     pause
     exit /b 1
 )
 
-echo  [OK] Python found:
-python --version
+echo  [OK] Python found.
 echo.
 
-REM Create virtual environment if it doesn't exist
+REM Create virtual environment if needed
 if not exist "venv\" (
-    echo  Setting up for first time use...
-    echo  Creating virtual environment...
+    echo  First time setup...
     python -m venv venv
     if errorlevel 1 (
         echo  [ERROR] Failed to create virtual environment.
@@ -46,22 +37,21 @@ if not exist "venv\" (
 REM Activate virtual environment
 call venv\Scripts\activate.bat
 
-REM Install dependencies if needed
+REM Install packages if needed
 pip show mutagen >nul 2>&1
 if errorlevel 1 (
-    echo  Installing required packages...
-    echo  (this includes ffmpeg — may take a minute on first run)
+    echo  Installing packages (first time only, may take a minute)...
     pip install -r requirements.txt
     if errorlevel 1 (
         echo  [ERROR] Failed to install packages.
         pause
         exit /b 1
     )
-    echo  [OK] All packages installed.
+    echo  [OK] Packages installed.
     echo.
 )
 
-echo  Running Audio File Scanner...
+echo  Starting scanner...
 echo  ============================================
 echo.
 
@@ -69,7 +59,7 @@ python extract_audio.py
 
 echo.
 echo  ============================================
-echo  Done! Check this folder for your CSV files.
+echo  Done! Check this folder for your CSV file.
 echo  ============================================
 echo.
 pause

@@ -3,15 +3,12 @@
 Audio File Scanner — Monthly Report by Date & Address
 
 Double-click setup_and_run.bat to launch.
-A popup window will appear — paste or browse to your month folder.
 
 Expected folder structure:
     Month Folder (e.g. January)/
-      2/                            ← day of month
-        22 Steeplechase Way .../    ← job address folder
-          file1.m4a                 ← audio files
-        Flat C, Dolphin House .../
-          file3.mp3
+      2/                            <- day of month
+        22 Steeplechase Way .../    <- job address folder
+          file1.m4a                 <- audio files
       5/
         ...
 """
@@ -28,65 +25,55 @@ from tkinter import filedialog, messagebox
 from datetime import datetime
 from pathlib import Path
 
+# ── Load dependencies ──
 try:
     from mutagen import File as MutagenFile
 except ImportError:
-    sys.exit("Error: 'mutagen' is not installed. Run: pip install mutagen")
+    sys.exit("Error: 'mutagen' not installed. Run: pip install mutagen")
 
-# Try to get bundled ffprobe path (auto-downloads on first run)
-FFPROBE_PATH = "ffprobe"  # default: assume on system PATH
 try:
     import static_ffmpeg
     static_ffmpeg.add_paths()
 except ImportError:
     pass
 
-# ──────────────────────────────────────────────
-# CONFIGURATION
-# ──────────────────────────────────────────────
+# ── Config ──
 OUTPUT_DIR = Path(".")
 LOG_FILE = Path("processing_log.txt")
-SUPPORTED_EXTENSIONS = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".wma", ".aac"}
 
-# Extensions that are definitely NOT audio — skip these files
 SKIP_EXTENSIONS = {
     ".txt", ".doc", ".docx", ".pdf", ".xls", ".xlsx", ".csv", ".rtf",
     ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif", ".svg", ".ico", ".webp",
     ".zip", ".rar", ".7z", ".tar", ".gz", ".bz2",
     ".exe", ".bat", ".cmd", ".ps1", ".sh", ".msi",
     ".py", ".js", ".html", ".htm", ".css", ".xml", ".json", ".yaml", ".yml",
-    ".ini", ".cfg", ".log", ".md",
-    ".db", ".sqlite", ".sql",
-    ".ppt", ".pptx",
+    ".ini", ".cfg", ".log", ".md", ".db", ".sqlite", ".sql", ".ppt", ".pptx",
+}
+
+MONTH_NAMES = {
+    "january": 1, "february": 2, "march": 3, "april": 4,
+    "may": 5, "june": 6, "july": 7, "august": 8,
+    "september": 9, "october": 10, "november": 11, "december": 12,
 }
 
 
-# ──────────────────────────────────────────────
-# Folder picker popup
-# ──────────────────────────────────────────────
-def ask_for_folder() -> str | None:
-    """Show a popup window where user can paste a path or browse for a folder."""
+# ── Folder picker popup ──
+def ask_for_folder():
     chosen_path = None
 
     root = tk.Tk()
     root.title("Audio File Scanner")
     root.resizable(False, False)
 
-    # Center the window on screen
-    window_width, window_height = 550, 200
-    screen_width = root.winfo_screenwidth()
-    screen_height = root.winfo_screenheight()
-    x = (screen_width - window_width) // 2
-    y = (screen_height - window_height) // 2
-    root.geometry(f"{window_width}x{window_height}+{x}+{y}")
-
-    # Keep window on top
+    w, h = 550, 200
+    x = (root.winfo_screenwidth() - w) // 2
+    y = (root.winfo_screenheight() - h) // 2
+    root.geometry(f"{w}x{h}+{x}+{y}")
     root.attributes("-topmost", True)
 
     tk.Label(root, text="Audio File Scanner", font=("Arial", 14, "bold")).pack(pady=(15, 5))
     tk.Label(root, text="Paste your month folder path below, or click Browse:").pack()
 
-    # Path entry field
     path_var = tk.StringVar()
     entry = tk.Entry(root, textvariable=path_var, width=60, font=("Arial", 10))
     entry.pack(padx=20, pady=8)
@@ -112,10 +99,7 @@ def ask_for_folder() -> str | None:
         chosen_path = p
         root.destroy()
 
-    def on_enter(event):
-        on_scan()
-
-    entry.bind("<Return>", on_enter)
+    entry.bind("<Return>", lambda e: on_scan())
 
     tk.Button(button_frame, text="Browse...", command=on_browse, width=12).pack(side=tk.LEFT, padx=5)
     tk.Button(button_frame, text="Scan", command=on_scan, width=12,
@@ -125,146 +109,103 @@ def ask_for_folder() -> str | None:
     return chosen_path
 
 
-# ──────────────────────────────────────────────
-# Logging
-# ──────────────────────────────────────────────
-def setup_logging(log_path: Path) -> logging.Logger:
+# ── Logging ──
+def setup_logging():
     logger = logging.getLogger("audio_scanner")
     logger.setLevel(logging.INFO)
     if logger.handlers:
         return logger
-
-    fmt = logging.Formatter("%(asctime)s  %(levelname)-8s  %(message)s",
-                            datefmt="%Y-%m-%d %H:%M:%S")
-
-    file_handler = logging.FileHandler(log_path, encoding="utf-8")
-    file_handler.setFormatter(fmt)
-    logger.addHandler(file_handler)
-
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(fmt)
-    logger.addHandler(console_handler)
-
+    fmt = logging.Formatter("%(asctime)s  %(levelname)-8s  %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+    fh = logging.FileHandler(LOG_FILE, encoding="utf-8")
+    fh.setFormatter(fmt)
+    logger.addHandler(fh)
+    ch = logging.StreamHandler()
+    ch.setFormatter(fmt)
+    logger.addHandler(ch)
     return logger
 
 
-# ──────────────────────────────────────────────
-# Audio helpers
-# ──────────────────────────────────────────────
-def is_known_non_audio(file_path: Path) -> bool:
-    """Return True for files that are definitely NOT audio (skip these)."""
-    ext = file_path.suffix.lower()
-    if ext in SKIP_EXTENSIONS:
-        return True
+# ── Audio duration readers ──
+def is_skip_file(file_path):
     if file_path.name.startswith('.'):
         return True
-    return False
+    return file_path.suffix.lower() in SKIP_EXTENSIONS
 
 
-def get_duration_ffprobe(file_path: Path) -> float | None:
-    """Try to get audio duration using ffprobe (requires ffmpeg installed)."""
-    try:
-        result = subprocess.run(
-            [
-                "ffprobe", "-v", "quiet",
-                "-print_format", "json",
-                "-show_format",
-                str(file_path),
-            ],
-            capture_output=True, text=True, timeout=15,
-        )
-        if result.returncode == 0:
-            info = json.loads(result.stdout)
-            duration = info.get("format", {}).get("duration")
-            if duration is not None:
-                return float(duration)
-    except (FileNotFoundError, subprocess.TimeoutExpired, json.JSONDecodeError, ValueError):
-        pass
-    return None
-
-
-def get_audio_duration(file_path: Path, logger: logging.Logger = None) -> float | None:
-    """Return duration in seconds. Tries mutagen first, then ffprobe as fallback."""
-    # Try mutagen first (fast, pure Python)
+def get_duration_mutagen(file_path):
     try:
         audio = MutagenFile(str(file_path))
         if audio is not None and audio.info is not None:
             return audio.info.length
     except Exception:
         pass
-
-    # Fallback to ffprobe for formats mutagen can't handle
-    dur = get_duration_ffprobe(file_path)
-    if dur is not None:
-        if logger:
-            logger.info("    (read via ffprobe: %s)", file_path.name)
-        return dur
-
     return None
 
 
-def format_duration(seconds: float) -> str:
-    """Convert seconds to MM:SS (minutes can exceed 59, no hours)."""
-    total = int(round(seconds))
-    minutes, secs = divmod(total, 60)
-    return f"{minutes:02d}:{secs:02d}"
-
-
-# ──────────────────────────────────────────────
-# Derive date from folder structure
-# ──────────────────────────────────────────────
-MONTH_NAMES = {
-    "january": 1, "february": 2, "march": 3, "april": 4,
-    "may": 5, "june": 6, "july": 7, "august": 8,
-    "september": 9, "october": 10, "november": 11, "december": 12,
-}
-
-
-def parse_date_from_path(month_folder: Path, day_folder_name: str) -> str:
-    """
-    Build a date string from the folder structure.
-    month_folder = .../2026/January, day_folder_name = "19"
-    Returns "19/01/2026"
-    """
-    month_name = month_folder.name.lower()
-    year_str = month_folder.parent.name
-
-    month_num = MONTH_NAMES.get(month_name)
-    if month_num is None:
-        month_num = datetime.now().month
-
+def get_duration_ffprobe(file_path):
     try:
-        year = int(year_str)
+        result = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", str(file_path)],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode == 0:
+            info = json.loads(result.stdout)
+            dur = info.get("format", {}).get("duration")
+            if dur is not None:
+                return float(dur)
+    except (FileNotFoundError, subprocess.TimeoutExpired, json.JSONDecodeError, ValueError):
+        pass
+    return None
+
+
+def get_duration(file_path, logger=None):
+    """Try mutagen first, then ffprobe."""
+    dur = get_duration_mutagen(file_path)
+    if dur is not None:
+        return dur
+    dur = get_duration_ffprobe(file_path)
+    if dur is not None and logger:
+        logger.info("    (read via ffprobe: %s)", file_path.name)
+    return dur
+
+
+def fmt_mmss(seconds):
+    total = int(round(seconds))
+    m, s = divmod(total, 60)
+    return f"{m:02d}:{s:02d}"
+
+
+def to_min_sec(seconds):
+    total = int(round(seconds))
+    return divmod(total, 60)
+
+
+# ── Date from folder structure ──
+def parse_date(month_folder, day_name):
+    month_num = MONTH_NAMES.get(month_folder.name.lower(), datetime.now().month)
+    try:
+        year = int(month_folder.parent.name)
     except ValueError:
         year = datetime.now().year
-
     try:
-        day = int(day_folder_name)
+        day = int(day_name)
     except ValueError:
         day = 1
-
     return f"{day:02d}/{month_num:02d}/{year}"
 
 
-# ──────────────────────────────────────────────
-# Discover and process
-# ──────────────────────────────────────────────
-def scan_month_folder(month_folder: Path, logger: logging.Logger):
-    """
-    Scan: month_folder / day / address / audio_files
-    Returns list of dicts with Date, Address, Duration_Secs, Duration_Str, Files_Count.
-    """
+# ── Scan folder ──
+def scan(month_folder, logger):
     results = []
 
     day_folders = []
     for item in month_folder.iterdir():
         if item.is_dir():
             try:
-                day_num = int(item.name)
-                day_folders.append((day_num, item))
+                day_folders.append((int(item.name), item))
             except ValueError:
                 logger.warning("Skipping non-date folder: %s", item.name)
-    day_folders.sort(key=lambda x: x[0])
+    day_folders.sort()
 
     if not day_folders:
         logger.info("No date folders found in %s", month_folder)
@@ -273,218 +214,150 @@ def scan_month_folder(month_folder: Path, logger: logging.Logger):
     logger.info("Found %d date folder(s)", len(day_folders))
 
     for day_num, day_path in day_folders:
-        date_str = parse_date_from_path(month_folder, day_path.name)
+        date_str = parse_date(month_folder, day_path.name)
 
         address_folders = sorted(
             [d for d in day_path.iterdir() if d.is_dir()],
             key=lambda x: x.name.lower()
         )
 
-        # Try ALL files that are not obviously non-audio
-        loose_files = [
-            f for f in day_path.iterdir()
-            if f.is_file() and not is_known_non_audio(f)
-        ]
+        # Loose files directly in the day folder
+        loose = [f for f in day_path.iterdir() if f.is_file() and not is_skip_file(f)]
 
-        if not address_folders and not loose_files:
-            logger.info("  Date %s: no address folders or audio files found", day_path.name)
-            continue
-
-        if loose_files:
+        if loose:
             total_secs = 0.0
-            file_count = 0
-            skipped = []
-            for fp in sorted(loose_files, key=lambda x: x.name.lower()):
-                dur = get_audio_duration(fp, logger)
+            count = 0
+            for fp in sorted(loose, key=lambda x: x.name.lower()):
+                dur = get_duration(fp, logger)
                 if dur is not None:
                     total_secs += dur
-                    file_count += 1
-                    logger.info("    %s  →  %s", fp.name, format_duration(dur))
-                else:
-                    skipped.append(fp.name)
-
-            for name in skipped:
-                logger.info("    Skipped (not audio): %s", name)
-
+                    count += 1
+                    logger.info("    %s  ->  %s", fp.name, fmt_mmss(dur))
             if total_secs > 0:
                 results.append({
-                    "Date": date_str,
-                    "Address": "(files in date folder)",
-                    "Duration_Secs": total_secs,
-                    "Duration_Str": format_duration(total_secs),
-                    "Files_Count": file_count,
+                    "Date": date_str, "Address": "(files in date folder)",
+                    "Secs": total_secs, "Count": count,
                 })
 
-        for addr_folder in address_folders:
-            # Try ALL files recursively, skip only known non-audio
-            candidate_files = sorted(
-                [f for f in addr_folder.rglob("*")
-                 if f.is_file() and not is_known_non_audio(f)],
+        # Address subfolders
+        for addr in address_folders:
+            files = sorted(
+                [f for f in addr.rglob("*") if f.is_file() and not is_skip_file(f)],
                 key=lambda x: x.name.lower()
             )
-
-            if not candidate_files:
+            if not files:
                 continue
 
-            logger.info("  Date %s | %s  (%d candidate files)", day_path.name, addr_folder.name, len(candidate_files))
+            logger.info("  Date %s | %s  (%d files)", day_path.name, addr.name, len(files))
 
             total_secs = 0.0
-            file_count = 0
-            skipped = []
-            for fp in candidate_files:
-                dur = get_audio_duration(fp, logger)
+            count = 0
+            for fp in files:
+                dur = get_duration(fp, logger)
                 if dur is not None:
                     total_secs += dur
-                    file_count += 1
-                    logger.info("    %s  →  %s", fp.name, format_duration(dur))
-                else:
-                    skipped.append(fp.name)
-
-            for name in skipped:
-                logger.info("    Skipped (not audio): %s", name)
+                    count += 1
+                    logger.info("    %s  ->  %s", fp.name, fmt_mmss(dur))
 
             if total_secs > 0:
                 results.append({
-                    "Date": date_str,
-                    "Address": addr_folder.name,
-                    "Duration_Secs": total_secs,
-                    "Duration_Str": format_duration(total_secs),
-                    "Files_Count": file_count,
+                    "Date": date_str, "Address": addr.name,
+                    "Secs": total_secs, "Count": count,
                 })
 
     return results
 
 
-# ──────────────────────────────────────────────
-# CSV output
-# ──────────────────────────────────────────────
-def secs_to_min_sec(seconds: float) -> tuple[int, int]:
-    """Convert seconds to (minutes, seconds) tuple."""
-    total = int(round(seconds))
-    mins, secs = divmod(total, 60)
-    return mins, secs
-
-
-def write_report_csv(output_path: Path, results: list[dict], month_folder: Path):
-    """Write the report CSV with a grand total."""
-    with output_path.open("w", newline="", encoding="utf-8-sig") as fh:
-        writer = csv.writer(fh)
-        writer.writerow(["Date", "Job Address", "Files", "Minutes", "Seconds"])
+# ── CSV output ──
+def write_csv(path, results, month_folder):
+    with path.open("w", newline="", encoding="utf-8-sig") as fh:
+        w = csv.writer(fh)
+        w.writerow(["Date", "Job Address", "Files", "Minutes", "Seconds"])
 
         grand_secs = 0.0
         grand_files = 0
 
         for row in results:
-            mins, secs = secs_to_min_sec(row["Duration_Secs"])
-            writer.writerow([
-                row["Date"],
-                row["Address"],
-                row["Files_Count"],
-                mins,
-                secs,
-            ])
-            grand_secs += row["Duration_Secs"]
-            grand_files += row["Files_Count"]
+            m, s = to_min_sec(row["Secs"])
+            w.writerow([row["Date"], row["Address"], row["Count"], m, s])
+            grand_secs += row["Secs"]
+            grand_files += row["Count"]
 
-        # Grand total
-        writer.writerow([])
-        client_name = month_folder.parent.parent.name
-        month_name = month_folder.name
+        w.writerow([])
+        client = month_folder.parent.parent.name
+        month = month_folder.name
         year = month_folder.parent.name
-        grand_mins, grand_s = secs_to_min_sec(grand_secs)
-        writer.writerow([
-            "",
-            f"** GRAND TOTAL -- {client_name} -- {month_name} {year} **",
-            grand_files,
-            grand_mins,
-            grand_s,
-        ])
+        gm, gs = to_min_sec(grand_secs)
+        w.writerow(["", f"** GRAND TOTAL -- {client} -- {month} {year} **", grand_files, gm, gs])
 
 
-# ──────────────────────────────────────────────
-# Console report
-# ──────────────────────────────────────────────
-def print_report(results: list[dict], month_folder: Path):
-    """Print a clean summary table to the console."""
+# ── Console report ──
+def print_report(results, month_folder):
     if not results:
         print("\n  No audio files found.\n")
         return
 
-    client_name = month_folder.parent.parent.name
-    month_name = month_folder.name
+    client = month_folder.parent.parent.name
+    month = month_folder.name
     year = month_folder.parent.name
 
-    sep = "-" * 95
-    thick_sep = "=" * 95
-
-    print(f"\n  {thick_sep}")
-    print(f"  AUDIO REPORT -- {client_name} -- {month_name} {year}")
-    print(f"  {thick_sep}")
+    line = "=" * 95
+    print(f"\n  {line}")
+    print(f"  AUDIO REPORT -- {client} -- {month} {year}")
+    print(f"  {line}")
     print(f"  {'DATE':<14} {'JOB ADDRESS':<50} {'FILES':>6} {'MINS':>8} {'SECS':>8}")
-    print(f"  {sep}")
+    print(f"  {'-' * 95}")
 
     grand_secs = 0.0
     grand_files = 0
-    total_addresses = 0
 
     for row in results:
-        addr_display = row["Address"]
-        if len(addr_display) > 48:
-            addr_display = addr_display[:45] + "..."
+        addr = row["Address"][:45] + "..." if len(row["Address"]) > 48 else row["Address"]
+        m, s = to_min_sec(row["Secs"])
+        print(f"  {row['Date']:<14} {addr:<50} {row['Count']:>6} {m:>8} {s:>8}")
+        grand_secs += row["Secs"]
+        grand_files += row["Count"]
 
-        mins, secs = secs_to_min_sec(row["Duration_Secs"])
-        print(f"  {row['Date']:<14} {addr_display:<50} {row['Files_Count']:>6} {mins:>8} {secs:>8}")
-        grand_secs += row["Duration_Secs"]
-        grand_files += row["Files_Count"]
-        total_addresses += 1
-
-    grand_mins, grand_s = secs_to_min_sec(grand_secs)
-    print(f"  {thick_sep}")
-    print(f"  {'GRAND TOTAL':<14} {total_addresses} address(es) across {len(set(r['Date'] for r in results))} date(s)"
-          f"{'':>12} {grand_files:>6} {grand_mins:>8} {grand_s:>8}")
-    print(f"  {thick_sep}\n")
+    gm, gs = to_min_sec(grand_secs)
+    dates = len(set(r["Date"] for r in results))
+    print(f"  {line}")
+    print(f"  {'GRAND TOTAL':<14} {len(results)} address(es) across {dates} date(s)"
+          f"{'':>12} {grand_files:>6} {gm:>8} {gs:>8}")
+    print(f"  {line}\n")
 
 
-# ──────────────────────────────────────────────
-# Main
-# ──────────────────────────────────────────────
+# ── Main ──
 def main():
-    logger = setup_logging(LOG_FILE)
+    logger = setup_logging()
     logger.info("=" * 50)
     logger.info("Audio Scanner started")
     logger.info("OS: %s %s", platform.system(), platform.release())
     logger.info("Python: %s", sys.version.split()[0])
 
-    # Show popup to get folder path
     folder_path = ask_for_folder()
-
     if not folder_path:
         print("\n  No folder selected. Exiting.\n")
         return
 
     month_folder = Path(folder_path)
+    logger.info("Scanning: %s", month_folder)
 
-    logger.info("Scanning month folder: %s", month_folder)
-
-    results = scan_month_folder(month_folder, logger)
+    results = scan(month_folder, logger)
 
     if not results:
         print(f"\n  No audio files found in: {month_folder}")
-        print("  Make sure the folder structure is: Month / Date / Address / audio files\n")
+        print("  Expected structure: Month / Day / Address / audio files\n")
         input("  Press Enter to exit...")
         return
 
-    # Print to console
     print_report(results, month_folder)
 
-    # Write CSV next to the script
-    client_name = month_folder.parent.parent.name.replace(" ", "_")
-    month_name = month_folder.name
+    client = month_folder.parent.parent.name.replace(" ", "_")
+    month = month_folder.name
     year = month_folder.parent.name
-    csv_filename = f"audio_report_{client_name}_{month_name}_{year}.csv"
-    csv_path = OUTPUT_DIR / csv_filename
+    csv_path = OUTPUT_DIR / f"audio_report_{client}_{month}_{year}.csv"
 
-    write_report_csv(csv_path, results, month_folder)
+    write_csv(csv_path, results, month_folder)
     logger.info("CSV written: %s", csv_path)
     print(f"  CSV saved: {csv_path.resolve()}\n")
 
