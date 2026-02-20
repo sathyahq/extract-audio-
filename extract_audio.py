@@ -1,25 +1,28 @@
 #!/usr/bin/env python3
 """
-Audio File Scanner — Total duration per Job Address (month-wise)
+Audio File Scanner — Monthly Report by Date & Address
 
-Scans a root folder containing subfolders (one per job address).
-Each subfolder holds audio files (.mp3, .wav, .m4a, .flac).
+Scans a MONTH folder with this structure:
 
-Creates a separate CSV for each month automatically:
-  - audio_index_2026-01.csv
-  - audio_index_2026-02.csv
-  - ...
+    Month Folder (e.g. January)/
+      2/                            ← day of month
+        22 Steeplechase Way .../    ← job address folder
+          file1.m4a                 ← audio files
+          file2.m4a
+        Flat C, Dolphin House .../  ← another address
+          file3.mp3
+      5/                            ← another day
+        ...
 
-Also outputs:
-  - processing_log.txt    timestamped run log
-  - (optional) .xlsx versions of each monthly CSV
+Outputs:
+  - A CSV and on-screen table with totals per date per address
+  - Date totals and a grand total for the whole month
 """
 
 import csv
 import logging
 import platform
 import sys
-from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
@@ -28,33 +31,23 @@ try:
 except ImportError:
     sys.exit("Error: 'mutagen' is not installed. Run: pip install mutagen")
 
-try:
-    import pandas as pd
-except ImportError:
-    sys.exit("Error: 'pandas' is not installed. Run: pip install pandas")
+# ──────────────────────────────────────────────
+# CONFIGURATION — edit this path to your month folder
+# ──────────────────────────────────────────────
+AUDIO_FOLDER = Path(r"F:\AURASKY DATA\Clients\NLG - Midchesire\2026\February")
+#                    ↑ Change this to your month folder path
 
-# ──────────────────────────────────────────────
-# CONFIGURATION — edit these values as needed
-# ──────────────────────────────────────────────
-AUDIO_FOLDER = Path.home() / "Music"  # <-- root folder containing job-address subfolders
-OUTPUT_DIR = Path(".")                # <-- folder where monthly CSVs are saved
+OUTPUT_DIR = Path(".")
 LOG_FILE = Path("processing_log.txt")
 EXPORT_EXCEL = False  # set True to also produce .xlsx
 
-SUPPORTED_EXTENSIONS = {".mp3", ".wav", ".m4a", ".flac"}
-
-CSV_COLUMNS = [
-    "Date_Received",
-    "Job_Address",
-    "Total_Duration",
-]
+SUPPORTED_EXTENSIONS = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".wma", ".aac"}
 
 
 # ──────────────────────────────────────────────
 # Logging
 # ──────────────────────────────────────────────
 def setup_logging(log_path: Path) -> logging.Logger:
-    """Configure a logger that writes to both console and a log file."""
     logger = logging.getLogger("audio_scanner")
     logger.setLevel(logging.INFO)
     if logger.handlers:
@@ -89,136 +82,15 @@ def get_audio_duration(file_path: Path) -> float | None:
 
 
 def format_duration(seconds: float) -> str:
-    """Convert seconds → MM:SS (or HH:MM:SS if >= 1 hour)."""
+    """Convert seconds to HH:MM:SS."""
     total = int(round(seconds))
     hours, remainder = divmod(total, 3600)
     minutes, secs = divmod(remainder, 60)
-    if hours > 0:
-        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
-    return f"{minutes:02d}:{secs:02d}"
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
 
-def get_folder_date(folder: Path) -> tuple[str, str]:
-    """
-    Get the date the job folder was received.
-    Uses the folder's creation time (or earliest modification time).
-
-    Returns (date_str, month_key):
-        date_str  = "2026-02-16"
-        month_key = "2026-02"
-    """
-    stat = folder.stat()
-    # st_birthtime exists on macOS; fall back to st_mtime elsewhere
-    timestamp = getattr(stat, "st_birthtime", None) or stat.st_mtime
-    dt = datetime.fromtimestamp(timestamp)
-    return dt.strftime("%Y-%m-%d"), dt.strftime("%Y-%m")
-
-
-def monthly_csv_path(output_dir: Path, month_key: str) -> Path:
-    """Return the CSV path for a given month, e.g. audio_index_2026-02.csv"""
-    return output_dir / f"audio_index_{month_key}.csv"
-
-
-# ──────────────────────────────────────────────
-# File discovery
-# ──────────────────────────────────────────────
-def discover_jobs(root: Path) -> dict[str, list[Path]]:
-    """
-    Walk *root* and group audio files by job address.
-
-    Structure expected:
-        root/
-          Job Address A/
-            file1.m4a
-            file2.m4a
-          Job Address B/
-            file3.mp3
-
-    If audio files sit directly in *root* (no subfolders), they are
-    grouped under a single job called the root folder name.
-    """
-    jobs: dict[str, list[Path]] = defaultdict(list)
-
-    # Files directly in the root folder
-    for p in sorted(root.iterdir(), key=lambda x: x.name.lower()):
-        if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS:
-            jobs[root.name].append(p)
-
-    # Subfolders = job addresses
-    for subfolder in sorted(root.iterdir(), key=lambda x: x.name.lower()):
-        if not subfolder.is_dir():
-            continue
-        files = sorted(
-            [f for f in subfolder.rglob("*")
-             if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS],
-            key=lambda x: x.name.lower(),
-        )
-        if files:
-            jobs[subfolder.name] = files
-
-    return dict(jobs)
-
-
-# ──────────────────────────────────────────────
-# CSV helpers
-# ──────────────────────────────────────────────
-def load_existing_jobs(csv_path: Path) -> set[str]:
-    """Return Job_Address values already in the CSV."""
-    addresses: set[str] = set()
-    if not csv_path.exists():
-        return addresses
-    with csv_path.open(newline="", encoding="utf-8") as fh:
-        reader = csv.DictReader(fh)
-        for row in reader:
-            val = row.get("Job_Address", "")
-            if val and val != "** GRAND TOTAL **":
-                addresses.add(val)
-    return addresses
-
-
-def write_csv(csv_path: Path, rows: list[dict]) -> None:
-    """Write (overwrite) a CSV with the 3-column layout + grand total."""
-    with csv_path.open("w", newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(fh, fieldnames=CSV_COLUMNS)
-        writer.writeheader()
-        writer.writerows(rows)
-
-
-def read_existing_rows(csv_path: Path) -> list[dict]:
-    """Read all non-total rows from the existing CSV."""
-    rows: list[dict] = []
-    if not csv_path.exists():
-        return rows
-    with csv_path.open(newline="", encoding="utf-8") as fh:
-        reader = csv.DictReader(fh)
-        for row in reader:
-            if row.get("Job_Address") != "** GRAND TOTAL **":
-                rows.append(row)
-    return rows
-
-
-# ──────────────────────────────────────────────
-# Excel export
-# ──────────────────────────────────────────────
-def export_to_excel(csv_path: Path) -> Path:
-    """Read the CSV and write an .xlsx copy next to it."""
-    xlsx_path = csv_path.with_suffix(".xlsx")
-    df = pd.read_csv(csv_path)
-    try:
-        df.to_excel(xlsx_path, index=False)
-    except ImportError:
-        sys.exit(
-            "Error: 'openpyxl' is required for Excel export. "
-            "Run: pip install openpyxl"
-        )
-    return xlsx_path
-
-
-# ──────────────────────────────────────────────
-# Duration parsing
-# ──────────────────────────────────────────────
 def duration_to_secs(d: str) -> int:
-    """Parse MM:SS or HH:MM:SS back to total seconds."""
+    """Parse HH:MM:SS or MM:SS back to total seconds."""
     parts = d.split(":")
     if len(parts) == 3:
         return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
@@ -226,152 +98,373 @@ def duration_to_secs(d: str) -> int:
 
 
 # ──────────────────────────────────────────────
-# Console report
+# Derive date from folder structure
 # ──────────────────────────────────────────────
-def print_month_report(month: str, rows: list[dict], total_secs: float) -> None:
-    """Print a clean summary table for one month."""
-    sep = "─" * 64
-    print(f"\n  Month: {month}")
-    print(f"  {sep}")
-    print(f"  {'DATE':<14} {'JOB ADDRESS':<34} {'TOTAL DURATION':>14}")
-    print(f"  {sep}")
-    for r in rows:
-        print(f"  {r['Date_Received']:<14} {r['Job_Address']:<34} {r['Total_Duration']:>14}")
-    print(f"  {sep}")
-    print(f"  {'':<14} {'MONTH TOTAL':<34} {format_duration(total_secs):>14}")
-    print(f"  {sep}")
+MONTH_NAMES = {
+    "january": 1, "february": 2, "march": 3, "april": 4,
+    "may": 5, "june": 6, "july": 7, "august": 8,
+    "september": 9, "october": 10, "november": 11, "december": 12,
+}
 
 
-def print_grand_total(all_months: dict[str, list[dict]]) -> None:
-    """Print the grand total across all months."""
-    total_jobs = sum(len(rows) for rows in all_months.values())
-    total_secs = 0
-    for rows in all_months.values():
-        total_secs += sum(duration_to_secs(r["Total_Duration"]) for r in rows)
-    sep = "═" * 64
-    print(f"\n  {sep}")
-    print(f"  {'GRAND TOTAL':<48} {total_jobs} job(s)   {format_duration(total_secs)}")
-    print(f"  {sep}\n")
+def parse_date_from_path(month_folder: Path, day_folder_name: str) -> str:
+    """
+    Build a date string from the folder structure.
+
+    month_folder = .../2026/January
+    day_folder_name = "19"
+
+    Returns "19/01/2026"
+    """
+    month_name = month_folder.name.lower()
+    year_str = month_folder.parent.name
+
+    month_num = MONTH_NAMES.get(month_name)
+    if month_num is None:
+        # fallback: use current month
+        month_num = datetime.now().month
+
+    try:
+        year = int(year_str)
+    except ValueError:
+        year = datetime.now().year
+
+    try:
+        day = int(day_folder_name)
+    except ValueError:
+        day = 1
+
+    return f"{day:02d}/{month_num:02d}/{year}"
 
 
 # ──────────────────────────────────────────────
-# Main processing
+# Discover and process
 # ──────────────────────────────────────────────
-def process_folder(
-    root: Path,
-    output_dir: Path,
-    logger: logging.Logger,
-    export_xlsx: bool = False,
-) -> None:
-    """Scan *root* for job-address subfolders, sum durations, write monthly CSVs."""
-    logger.info("OS detected: %s %s", platform.system(), platform.release())
-    logger.info("Python version: %s", sys.version.split()[0])
-    logger.info("Scanning root folder: %s", root)
+def scan_month_folder(month_folder: Path, logger: logging.Logger):
+    """
+    Scan the month folder structure:
+      month_folder / day / address / audio_files
 
-    if not root.is_dir():
-        logger.error("Folder does not exist: %s", root)
-        return
+    Returns a list of dicts:
+      [ {Date, Address, Duration_Secs, Duration_Str, Files_Count}, ... ]
+    """
+    results = []
 
-    jobs = discover_jobs(root)
-    if not jobs:
-        logger.info("No audio files found — exiting.")
-        return
+    # Get all day subfolders, sorted numerically
+    day_folders = []
+    for item in month_folder.iterdir():
+        if item.is_dir():
+            try:
+                day_num = int(item.name)
+                day_folders.append((day_num, item))
+            except ValueError:
+                logger.warning("Skipping non-date folder: %s", item.name)
+    day_folders.sort(key=lambda x: x[0])
 
-    logger.info("Found %d job address(es)", len(jobs))
+    if not day_folders:
+        logger.info("No date folders found in %s", month_folder)
+        return results
 
-    # Collect all existing job names across all monthly CSVs to detect duplicates
-    all_existing_jobs: set[str] = set()
-    for csv_file in output_dir.glob("audio_index_*.csv"):
-        all_existing_jobs.update(load_existing_jobs(csv_file))
+    logger.info("Found %d date folder(s)", len(day_folders))
 
-    # Process each job and bucket by month
-    new_by_month: dict[str, list[dict]] = defaultdict(list)
-    total_new = 0
-    total_skipped = 0
+    for day_num, day_path in day_folders:
+        date_str = parse_date_from_path(month_folder, day_path.name)
 
-    for job_address, files in jobs.items():
-        if job_address in all_existing_jobs:
-            logger.info("Job already in a CSV, skipping: %s", job_address)
+        # Each subfolder inside the day folder = a job address
+        address_folders = sorted(
+            [d for d in day_path.iterdir() if d.is_dir()],
+            key=lambda x: x.name.lower()
+        )
+
+        # Also check for audio files directly in the day folder (no address subfolder)
+        loose_files = [
+            f for f in day_path.iterdir()
+            if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS
+        ]
+
+        if not address_folders and not loose_files:
+            logger.info("  Date %s: no address folders or audio files found", day_path.name)
             continue
 
-        logger.info("Processing job: %s  (%d audio files)", job_address, len(files))
-        job_secs = 0.0
+        # Process loose files under a generic name
+        if loose_files:
+            total_secs = 0.0
+            file_count = 0
+            for fp in sorted(loose_files, key=lambda x: x.name.lower()):
+                dur = get_audio_duration(fp)
+                if dur is not None:
+                    total_secs += dur
+                    file_count += 1
+                    logger.info("    %s  →  %s", fp.name, format_duration(dur))
+                else:
+                    logger.warning("    Unreadable: %s", fp.name)
 
-        # Determine the job folder for date detection
-        job_folder = files[0].parent if files else root
+            if total_secs > 0:
+                results.append({
+                    "Date": date_str,
+                    "Address": "(files in date folder)",
+                    "Duration_Secs": total_secs,
+                    "Duration_Str": format_duration(total_secs),
+                    "Files_Count": file_count,
+                })
 
-        for fp in files:
-            duration = get_audio_duration(fp)
-            if duration is None:
-                logger.warning("  Unreadable — skipped: %s", fp.name)
-                total_skipped += 1
+        # Process each address folder
+        for addr_folder in address_folders:
+            audio_files = sorted(
+                [f for f in addr_folder.rglob("*")
+                 if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS],
+                key=lambda x: x.name.lower()
+            )
+
+            if not audio_files:
                 continue
-            job_secs += duration
-            logger.info("  %s  →  %s", fp.name, format_duration(duration))
 
-        if job_secs > 0:
-            date_str, month_key = get_folder_date(job_folder)
-            row = {
-                "Date_Received": date_str,
-                "Job_Address": job_address,
-                "Total_Duration": format_duration(job_secs),
-            }
-            new_by_month[month_key].append(row)
-            total_new += 1
+            logger.info("  Date %s | %s  (%d files)", day_path.name, addr_folder.name, len(audio_files))
 
-    # Write each month's CSV (merge with existing rows)
-    all_months_combined: dict[str, list[dict]] = defaultdict(list)
+            total_secs = 0.0
+            file_count = 0
+            for fp in audio_files:
+                dur = get_audio_duration(fp)
+                if dur is not None:
+                    total_secs += dur
+                    file_count += 1
+                    logger.info("    %s  →  %s", fp.name, format_duration(dur))
+                else:
+                    logger.warning("    Unreadable: %s", fp.name)
 
-    for month_key, new_rows in sorted(new_by_month.items()):
-        csv_path = monthly_csv_path(output_dir, month_key)
-        existing_rows = read_existing_rows(csv_path)
-        merged = existing_rows + new_rows
+            if total_secs > 0:
+                results.append({
+                    "Date": date_str,
+                    "Address": addr_folder.name,
+                    "Duration_Secs": total_secs,
+                    "Duration_Str": format_duration(total_secs),
+                    "Files_Count": file_count,
+                })
 
-        # Month total row
-        month_secs = sum(duration_to_secs(r["Total_Duration"]) for r in merged)
-        total_row = {
-            "Date_Received": "",
-            "Job_Address": f"** TOTAL {month_key} **",
-            "Total_Duration": format_duration(month_secs),
-        }
-
-        write_csv(csv_path, merged + [total_row])
-        logger.info("CSV written: %s  (%d jobs, %d new)", csv_path.name, len(merged), len(new_rows))
-        all_months_combined[month_key] = merged
-
-        if export_xlsx:
-            logger.info("Excel export → %s", export_to_excel(csv_path))
-
-    # Also include months with no new rows (for console report)
-    for csv_file in sorted(output_dir.glob("audio_index_*.csv")):
-        month_key = csv_file.stem.replace("audio_index_", "")
-        if month_key not in all_months_combined:
-            rows = read_existing_rows(csv_file)
-            if rows:
-                all_months_combined[month_key] = rows
-
-    if total_skipped:
-        logger.warning("Skipped %d unreadable file(s) — see log for details", total_skipped)
-
-    # Console report
-    if all_months_combined:
-        for month_key in sorted(all_months_combined):
-            rows = all_months_combined[month_key]
-            month_secs = sum(duration_to_secs(r["Total_Duration"]) for r in rows)
-            print_month_report(month_key, rows, month_secs)
-        print_grand_total(all_months_combined)
-
-    logger.info("Run complete — new: %d, skipped: %d", total_new, total_skipped)
+    return results
 
 
 # ──────────────────────────────────────────────
-# Entry point
+# CSV output
 # ──────────────────────────────────────────────
-def main() -> None:
+def write_report_csv(output_path: Path, results: list[dict], month_folder: Path):
+    """Write the report CSV with date totals and grand total."""
+    with output_path.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(["Date", "Job Address", "Files", "Total Duration"])
+
+        current_date = None
+        date_secs = 0.0
+        grand_secs = 0.0
+        grand_files = 0
+
+        for row in results:
+            # If date changed, write the date total for the previous date
+            if current_date is not None and row["Date"] != current_date:
+                writer.writerow(["", f"** DATE TOTAL ({current_date}) **", "", format_duration(date_secs)])
+                writer.writerow([])  # blank line
+                date_secs = 0.0
+
+            current_date = row["Date"]
+            writer.writerow([
+                row["Date"],
+                row["Address"],
+                row["Files_Count"],
+                row["Duration_Str"],
+            ])
+            date_secs += row["Duration_Secs"]
+            grand_secs += row["Duration_Secs"]
+            grand_files += row["Files_Count"]
+
+        # Final date total
+        if current_date is not None:
+            writer.writerow(["", f"** DATE TOTAL ({current_date}) **", "", format_duration(date_secs)])
+
+        # Grand total
+        writer.writerow([])
+        client_name = month_folder.parent.parent.name  # e.g. "NLG - Portsmouth"
+        month_name = month_folder.name
+        year = month_folder.parent.name
+        writer.writerow([
+            "",
+            f"** GRAND TOTAL — {client_name} — {month_name} {year} **",
+            grand_files,
+            format_duration(grand_secs),
+        ])
+
+
+def write_report_excel(output_path: Path, results: list[dict], month_folder: Path):
+    """Write the report as an Excel file with formatting."""
+    try:
+        import pandas as pd
+    except ImportError:
+        return None
+
+    rows_for_df = []
+    current_date = None
+    date_secs = 0.0
+    grand_secs = 0.0
+
+    for row in results:
+        if current_date is not None and row["Date"] != current_date:
+            rows_for_df.append({
+                "Date": "",
+                "Job Address": f"DATE TOTAL ({current_date})",
+                "Files": "",
+                "Total Duration": format_duration(date_secs),
+            })
+            rows_for_df.append({"Date": "", "Job Address": "", "Files": "", "Total Duration": ""})
+            date_secs = 0.0
+
+        current_date = row["Date"]
+        rows_for_df.append({
+            "Date": row["Date"],
+            "Job Address": row["Address"],
+            "Files": row["Files_Count"],
+            "Total Duration": row["Duration_Str"],
+        })
+        date_secs += row["Duration_Secs"]
+        grand_secs += row["Duration_Secs"]
+
+    if current_date is not None:
+        rows_for_df.append({
+            "Date": "",
+            "Job Address": f"DATE TOTAL ({current_date})",
+            "Files": "",
+            "Total Duration": format_duration(date_secs),
+        })
+
+    client_name = month_folder.parent.parent.name
+    month_name = month_folder.name
+    year = month_folder.parent.name
+    rows_for_df.append({"Date": "", "Job Address": "", "Files": "", "Total Duration": ""})
+    rows_for_df.append({
+        "Date": "",
+        "Job Address": f"GRAND TOTAL — {client_name} — {month_name} {year}",
+        "Files": "",
+        "Total Duration": format_duration(grand_secs),
+    })
+
+    df = pd.DataFrame(rows_for_df)
+    xlsx_path = output_path.with_suffix(".xlsx")
+    try:
+        df.to_excel(xlsx_path, index=False)
+        return xlsx_path
+    except ImportError:
+        return None
+
+
+# ──────────────────────────────────────────────
+# Console report
+# ──────────────────────────────────────────────
+def print_report(results: list[dict], month_folder: Path):
+    """Print a clean summary table to the console."""
+    if not results:
+        print("\n  No audio files found.\n")
+        return
+
+    client_name = month_folder.parent.parent.name
+    month_name = month_folder.name
+    year = month_folder.parent.name
+
+    sep = "─" * 90
+    thick_sep = "═" * 90
+
+    print(f"\n  {thick_sep}")
+    print(f"  AUDIO REPORT — {client_name} — {month_name} {year}")
+    print(f"  {thick_sep}")
+    print(f"  {'DATE':<14} {'JOB ADDRESS':<50} {'FILES':>6} {'DURATION':>12}")
+    print(f"  {sep}")
+
+    current_date = None
+    date_secs = 0.0
+    date_files = 0
+    grand_secs = 0.0
+    grand_files = 0
+    total_addresses = 0
+
+    for row in results:
+        # Print date subtotal when date changes
+        if current_date is not None and row["Date"] != current_date:
+            print(f"  {'':<14} {'DATE TOTAL':<50} {date_files:>6} {format_duration(date_secs):>12}")
+            print(f"  {sep}")
+            date_secs = 0.0
+            date_files = 0
+
+        current_date = row["Date"]
+
+        # Truncate long address names for display
+        addr_display = row["Address"]
+        if len(addr_display) > 48:
+            addr_display = addr_display[:45] + "..."
+
+        print(f"  {row['Date']:<14} {addr_display:<50} {row['Files_Count']:>6} {row['Duration_Str']:>12}")
+        date_secs += row["Duration_Secs"]
+        date_files += row["Files_Count"]
+        grand_secs += row["Duration_Secs"]
+        grand_files += row["Files_Count"]
+        total_addresses += 1
+
+    # Final date subtotal
+    if current_date is not None:
+        print(f"  {'':<14} {'DATE TOTAL':<50} {date_files:>6} {format_duration(date_secs):>12}")
+
+    print(f"  {thick_sep}")
+    print(f"  {'GRAND TOTAL':<14} {total_addresses} address(es) across {len(set(r['Date'] for r in results))} date(s)"
+          f"{'':>12} {grand_files:>6} {format_duration(grand_secs):>12}")
+    print(f"  {thick_sep}\n")
+
+
+# ──────────────────────────────────────────────
+# Main
+# ──────────────────────────────────────────────
+def main():
     logger = setup_logging(LOG_FILE)
     logger.info("=" * 50)
     logger.info("Audio Scanner started")
-    process_folder(AUDIO_FOLDER, OUTPUT_DIR, logger, export_xlsx=EXPORT_EXCEL)
+    logger.info("OS: %s %s", platform.system(), platform.release())
+    logger.info("Python: %s", sys.version.split()[0])
+
+    month_folder = AUDIO_FOLDER
+
+    if not month_folder.is_dir():
+        logger.error("Folder does not exist: %s", month_folder)
+        print(f"\n  [ERROR] Folder not found: {month_folder}")
+        print("  Please edit line 39 in extract_audio.py to set the correct path.\n")
+        input("  Press Enter to exit...")
+        return
+
+    logger.info("Scanning month folder: %s", month_folder)
+
+    results = scan_month_folder(month_folder, logger)
+
+    if not results:
+        print(f"\n  No audio files found in: {month_folder}")
+        print("  Make sure the folder structure is: Month / Date / Address / audio files\n")
+        input("  Press Enter to exit...")
+        return
+
+    # Print to console
+    print_report(results, month_folder)
+
+    # Write CSV
+    client_name = month_folder.parent.parent.name.replace(" ", "_")
+    month_name = month_folder.name
+    year = month_folder.parent.name
+    csv_filename = f"audio_report_{client_name}_{month_name}_{year}.csv"
+    csv_path = OUTPUT_DIR / csv_filename
+
+    write_report_csv(csv_path, results, month_folder)
+    logger.info("CSV written: %s", csv_path)
+    print(f"  CSV saved: {csv_path.resolve()}")
+
+    # Write Excel if enabled
+    if EXPORT_EXCEL:
+        xlsx_path = write_report_excel(csv_path, results, month_folder)
+        if xlsx_path:
+            logger.info("Excel written: %s", xlsx_path)
+            print(f"  Excel saved: {xlsx_path.resolve()}")
+
     logger.info("Done.\n")
 
 
