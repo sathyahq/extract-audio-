@@ -248,41 +248,27 @@ def scan_month_folder(month_folder: Path, logger: logging.Logger):
 # CSV output
 # ──────────────────────────────────────────────
 def write_report_csv(output_path: Path, results: list[dict], month_folder: Path):
-    """Write the report CSV with date totals and grand total."""
+    """Write the report CSV with a grand total."""
     with output_path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)
         writer.writerow(["Date", "Job Address", "Files", "Total Duration"])
 
-        current_date = None
-        date_secs = 0.0
         grand_secs = 0.0
         grand_files = 0
 
         for row in results:
-            # If date changed, write the date total for the previous date
-            if current_date is not None and row["Date"] != current_date:
-                writer.writerow(["", f"** DATE TOTAL ({current_date}) **", "", format_duration(date_secs)])
-                writer.writerow([])  # blank line
-                date_secs = 0.0
-
-            current_date = row["Date"]
             writer.writerow([
                 row["Date"],
                 row["Address"],
                 row["Files_Count"],
                 row["Duration_Str"],
             ])
-            date_secs += row["Duration_Secs"]
             grand_secs += row["Duration_Secs"]
             grand_files += row["Files_Count"]
 
-        # Final date total
-        if current_date is not None:
-            writer.writerow(["", f"** DATE TOTAL ({current_date}) **", "", format_duration(date_secs)])
-
         # Grand total
         writer.writerow([])
-        client_name = month_folder.parent.parent.name  # e.g. "NLG - Portsmouth"
+        client_name = month_folder.parent.parent.name
         month_name = month_folder.name
         year = month_folder.parent.name
         writer.writerow([
@@ -294,45 +280,23 @@ def write_report_csv(output_path: Path, results: list[dict], month_folder: Path)
 
 
 def write_report_excel(output_path: Path, results: list[dict], month_folder: Path):
-    """Write the report as an Excel file with formatting."""
+    """Write the report as an Excel file."""
     try:
         import pandas as pd
     except ImportError:
         return None
 
     rows_for_df = []
-    current_date = None
-    date_secs = 0.0
     grand_secs = 0.0
 
     for row in results:
-        if current_date is not None and row["Date"] != current_date:
-            rows_for_df.append({
-                "Date": "",
-                "Job Address": f"DATE TOTAL ({current_date})",
-                "Files": "",
-                "Total Duration": format_duration(date_secs),
-            })
-            rows_for_df.append({"Date": "", "Job Address": "", "Files": "", "Total Duration": ""})
-            date_secs = 0.0
-
-        current_date = row["Date"]
         rows_for_df.append({
             "Date": row["Date"],
             "Job Address": row["Address"],
             "Files": row["Files_Count"],
             "Total Duration": row["Duration_Str"],
         })
-        date_secs += row["Duration_Secs"]
         grand_secs += row["Duration_Secs"]
-
-    if current_date is not None:
-        rows_for_df.append({
-            "Date": "",
-            "Job Address": f"DATE TOTAL ({current_date})",
-            "Files": "",
-            "Total Duration": format_duration(date_secs),
-        })
 
     client_name = month_folder.parent.parent.name
     month_name = month_folder.name
@@ -376,38 +340,20 @@ def print_report(results: list[dict], month_folder: Path):
     print(f"  {'DATE':<14} {'JOB ADDRESS':<50} {'FILES':>6} {'DURATION':>12}")
     print(f"  {sep}")
 
-    current_date = None
-    date_secs = 0.0
-    date_files = 0
     grand_secs = 0.0
     grand_files = 0
     total_addresses = 0
 
     for row in results:
-        # Print date subtotal when date changes
-        if current_date is not None and row["Date"] != current_date:
-            print(f"  {'':<14} {'DATE TOTAL':<50} {date_files:>6} {format_duration(date_secs):>12}")
-            print(f"  {sep}")
-            date_secs = 0.0
-            date_files = 0
-
-        current_date = row["Date"]
-
         # Truncate long address names for display
         addr_display = row["Address"]
         if len(addr_display) > 48:
             addr_display = addr_display[:45] + "..."
 
         print(f"  {row['Date']:<14} {addr_display:<50} {row['Files_Count']:>6} {row['Duration_Str']:>12}")
-        date_secs += row["Duration_Secs"]
-        date_files += row["Files_Count"]
         grand_secs += row["Duration_Secs"]
         grand_files += row["Files_Count"]
         total_addresses += 1
-
-    # Final date subtotal
-    if current_date is not None:
-        print(f"  {'':<14} {'DATE TOTAL':<50} {date_files:>6} {format_duration(date_secs):>12}")
 
     print(f"  {thick_sep}")
     print(f"  {'GRAND TOTAL':<14} {total_addresses} address(es) across {len(set(r['Date'] for r in results))} date(s)"
