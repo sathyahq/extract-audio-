@@ -2,27 +2,27 @@
 """
 Audio File Scanner — Monthly Report by Date & Address
 
-Scans a MONTH folder with this structure:
+Double-click setup_and_run.bat to launch.
+A popup window will appear — paste or browse to your month folder.
 
+Expected folder structure:
     Month Folder (e.g. January)/
       2/                            ← day of month
         22 Steeplechase Way .../    ← job address folder
           file1.m4a                 ← audio files
-          file2.m4a
-        Flat C, Dolphin House .../  ← another address
+        Flat C, Dolphin House .../
           file3.mp3
-      5/                            ← another day
+      5/
         ...
-
-Outputs:
-  - A CSV and on-screen table with totals per date per address
-  - Date totals and a grand total for the whole month
 """
 
 import csv
 import logging
+import os
 import platform
 import sys
+import tkinter as tk
+from tkinter import filedialog, messagebox
 from datetime import datetime
 from pathlib import Path
 
@@ -32,16 +32,75 @@ except ImportError:
     sys.exit("Error: 'mutagen' is not installed. Run: pip install mutagen")
 
 # ──────────────────────────────────────────────
-# CONFIGURATION — edit this path to your month folder
+# CONFIGURATION
 # ──────────────────────────────────────────────
-AUDIO_FOLDER = Path(r"F:\AURASKY DATA\Clients\NLG - Midchesire\2026\February")
-#                    ↑ Change this to your month folder path
-
 OUTPUT_DIR = Path(".")
 LOG_FILE = Path("processing_log.txt")
-EXPORT_EXCEL = False  # set True to also produce .xlsx
-
 SUPPORTED_EXTENSIONS = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".wma", ".aac"}
+
+
+# ──────────────────────────────────────────────
+# Folder picker popup
+# ──────────────────────────────────────────────
+def ask_for_folder() -> str | None:
+    """Show a popup window where user can paste a path or browse for a folder."""
+    chosen_path = None
+
+    root = tk.Tk()
+    root.title("Audio File Scanner")
+    root.resizable(False, False)
+
+    # Center the window on screen
+    window_width, window_height = 550, 200
+    screen_width = root.winfo_screenwidth()
+    screen_height = root.winfo_screenheight()
+    x = (screen_width - window_width) // 2
+    y = (screen_height - window_height) // 2
+    root.geometry(f"{window_width}x{window_height}+{x}+{y}")
+
+    # Keep window on top
+    root.attributes("-topmost", True)
+
+    tk.Label(root, text="Audio File Scanner", font=("Arial", 14, "bold")).pack(pady=(15, 5))
+    tk.Label(root, text="Paste your month folder path below, or click Browse:").pack()
+
+    # Path entry field
+    path_var = tk.StringVar()
+    entry = tk.Entry(root, textvariable=path_var, width=60, font=("Arial", 10))
+    entry.pack(padx=20, pady=8)
+    entry.focus_set()
+
+    button_frame = tk.Frame(root)
+    button_frame.pack(pady=5)
+
+    def on_browse():
+        folder = filedialog.askdirectory(title="Select the MONTH folder (e.g. January)")
+        if folder:
+            path_var.set(folder)
+
+    def on_scan():
+        nonlocal chosen_path
+        p = path_var.get().strip().strip('"').strip("'")
+        if not p:
+            messagebox.showwarning("No path", "Please enter or browse to a folder path.")
+            return
+        if not os.path.isdir(p):
+            messagebox.showerror("Invalid folder", f"Folder not found:\n{p}")
+            return
+        chosen_path = p
+        root.destroy()
+
+    def on_enter(event):
+        on_scan()
+
+    entry.bind("<Return>", on_enter)
+
+    tk.Button(button_frame, text="Browse...", command=on_browse, width=12).pack(side=tk.LEFT, padx=5)
+    tk.Button(button_frame, text="Scan", command=on_scan, width=12,
+              bg="#4CAF50", fg="white", font=("Arial", 10, "bold")).pack(side=tk.LEFT, padx=5)
+
+    root.mainloop()
+    return chosen_path
 
 
 # ──────────────────────────────────────────────
@@ -110,10 +169,7 @@ MONTH_NAMES = {
 def parse_date_from_path(month_folder: Path, day_folder_name: str) -> str:
     """
     Build a date string from the folder structure.
-
-    month_folder = .../2026/January
-    day_folder_name = "19"
-
+    month_folder = .../2026/January, day_folder_name = "19"
     Returns "19/01/2026"
     """
     month_name = month_folder.name.lower()
@@ -121,7 +177,6 @@ def parse_date_from_path(month_folder: Path, day_folder_name: str) -> str:
 
     month_num = MONTH_NAMES.get(month_name)
     if month_num is None:
-        # fallback: use current month
         month_num = datetime.now().month
 
     try:
@@ -142,15 +197,11 @@ def parse_date_from_path(month_folder: Path, day_folder_name: str) -> str:
 # ──────────────────────────────────────────────
 def scan_month_folder(month_folder: Path, logger: logging.Logger):
     """
-    Scan the month folder structure:
-      month_folder / day / address / audio_files
-
-    Returns a list of dicts:
-      [ {Date, Address, Duration_Secs, Duration_Str, Files_Count}, ... ]
+    Scan: month_folder / day / address / audio_files
+    Returns list of dicts with Date, Address, Duration_Secs, Duration_Str, Files_Count.
     """
     results = []
 
-    # Get all day subfolders, sorted numerically
     day_folders = []
     for item in month_folder.iterdir():
         if item.is_dir():
@@ -170,13 +221,11 @@ def scan_month_folder(month_folder: Path, logger: logging.Logger):
     for day_num, day_path in day_folders:
         date_str = parse_date_from_path(month_folder, day_path.name)
 
-        # Each subfolder inside the day folder = a job address
         address_folders = sorted(
             [d for d in day_path.iterdir() if d.is_dir()],
             key=lambda x: x.name.lower()
         )
 
-        # Also check for audio files directly in the day folder (no address subfolder)
         loose_files = [
             f for f in day_path.iterdir()
             if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS
@@ -186,7 +235,6 @@ def scan_month_folder(month_folder: Path, logger: logging.Logger):
             logger.info("  Date %s: no address folders or audio files found", day_path.name)
             continue
 
-        # Process loose files under a generic name
         if loose_files:
             total_secs = 0.0
             file_count = 0
@@ -208,7 +256,6 @@ def scan_month_folder(month_folder: Path, logger: logging.Logger):
                     "Files_Count": file_count,
                 })
 
-        # Process each address folder
         for addr_folder in address_folders:
             audio_files = sorted(
                 [f for f in addr_folder.rglob("*")
@@ -279,45 +326,6 @@ def write_report_csv(output_path: Path, results: list[dict], month_folder: Path)
         ])
 
 
-def write_report_excel(output_path: Path, results: list[dict], month_folder: Path):
-    """Write the report as an Excel file."""
-    try:
-        import pandas as pd
-    except ImportError:
-        return None
-
-    rows_for_df = []
-    grand_secs = 0.0
-
-    for row in results:
-        rows_for_df.append({
-            "Date": row["Date"],
-            "Job Address": row["Address"],
-            "Files": row["Files_Count"],
-            "Total Duration": row["Duration_Str"],
-        })
-        grand_secs += row["Duration_Secs"]
-
-    client_name = month_folder.parent.parent.name
-    month_name = month_folder.name
-    year = month_folder.parent.name
-    rows_for_df.append({"Date": "", "Job Address": "", "Files": "", "Total Duration": ""})
-    rows_for_df.append({
-        "Date": "",
-        "Job Address": f"GRAND TOTAL — {client_name} — {month_name} {year}",
-        "Files": "",
-        "Total Duration": format_duration(grand_secs),
-    })
-
-    df = pd.DataFrame(rows_for_df)
-    xlsx_path = output_path.with_suffix(".xlsx")
-    try:
-        df.to_excel(xlsx_path, index=False)
-        return xlsx_path
-    except ImportError:
-        return None
-
-
 # ──────────────────────────────────────────────
 # Console report
 # ──────────────────────────────────────────────
@@ -345,7 +353,6 @@ def print_report(results: list[dict], month_folder: Path):
     total_addresses = 0
 
     for row in results:
-        # Truncate long address names for display
         addr_display = row["Address"]
         if len(addr_display) > 48:
             addr_display = addr_display[:45] + "..."
@@ -371,14 +378,14 @@ def main():
     logger.info("OS: %s %s", platform.system(), platform.release())
     logger.info("Python: %s", sys.version.split()[0])
 
-    month_folder = AUDIO_FOLDER
+    # Show popup to get folder path
+    folder_path = ask_for_folder()
 
-    if not month_folder.is_dir():
-        logger.error("Folder does not exist: %s", month_folder)
-        print(f"\n  [ERROR] Folder not found: {month_folder}")
-        print("  Please edit line 39 in extract_audio.py to set the correct path.\n")
-        input("  Press Enter to exit...")
+    if not folder_path:
+        print("\n  No folder selected. Exiting.\n")
         return
+
+    month_folder = Path(folder_path)
 
     logger.info("Scanning month folder: %s", month_folder)
 
@@ -393,7 +400,7 @@ def main():
     # Print to console
     print_report(results, month_folder)
 
-    # Write CSV
+    # Write CSV next to the script
     client_name = month_folder.parent.parent.name.replace(" ", "_")
     month_name = month_folder.name
     year = month_folder.parent.name
@@ -402,16 +409,7 @@ def main():
 
     write_report_csv(csv_path, results, month_folder)
     logger.info("CSV written: %s", csv_path)
-    print(f"  CSV saved: {csv_path.resolve()}")
-
-    # Write Excel if enabled
-    if EXPORT_EXCEL:
-        xlsx_path = write_report_excel(csv_path, results, month_folder)
-        if xlsx_path:
-            logger.info("Excel written: %s", xlsx_path)
-            print(f"  Excel saved: {xlsx_path.resolve()}")
-
-    logger.info("Done.\n")
+    print(f"  CSV saved: {csv_path.resolve()}\n")
 
 
 if __name__ == "__main__":
