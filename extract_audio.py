@@ -148,6 +148,13 @@ def format_duration(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
 
+def format_duration_mmss(seconds: float) -> str:
+    """Convert seconds to MM:SS (no hours, minutes can exceed 59)."""
+    total = int(round(seconds))
+    minutes, secs = divmod(total, 60)
+    return f"{minutes:02d}:{secs:02d}"
+
+
 def duration_to_secs(d: str) -> int:
     """Parse HH:MM:SS or MM:SS back to total seconds."""
     parts = d.split(":")
@@ -296,7 +303,7 @@ def scan_month_folder(month_folder: Path, logger: logging.Logger):
 # ──────────────────────────────────────────────
 def write_report_csv(output_path: Path, results: list[dict], month_folder: Path):
     """Write the report CSV with a grand total."""
-    with output_path.open("w", newline="", encoding="utf-8") as fh:
+    with output_path.open("w", newline="", encoding="utf-8-sig") as fh:
         writer = csv.writer(fh)
         writer.writerow(["Date", "Job Address", "Files", "Total Duration"])
 
@@ -322,7 +329,7 @@ def write_report_csv(output_path: Path, results: list[dict], month_folder: Path)
             "",
             f"** GRAND TOTAL — {client_name} — {month_name} {year} **",
             grand_files,
-            format_duration(grand_secs),
+            format_duration_mmss(grand_secs),
         ])
 
 
@@ -364,7 +371,7 @@ def print_report(results: list[dict], month_folder: Path):
 
     print(f"  {thick_sep}")
     print(f"  {'GRAND TOTAL':<14} {total_addresses} address(es) across {len(set(r['Date'] for r in results))} date(s)"
-          f"{'':>12} {grand_files:>6} {format_duration(grand_secs):>12}")
+          f"{'':>12} {grand_files:>6} {format_duration_mmss(grand_secs):>12}")
     print(f"  {thick_sep}\n")
 
 
