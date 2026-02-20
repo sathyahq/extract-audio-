@@ -196,26 +196,10 @@ def get_audio_duration(file_path: Path, logger: logging.Logger = None) -> float 
 
 
 def format_duration(seconds: float) -> str:
-    """Convert seconds to HH:MM:SS."""
-    total = int(round(seconds))
-    hours, remainder = divmod(total, 3600)
-    minutes, secs = divmod(remainder, 60)
-    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
-
-
-def format_duration_mmss(seconds: float) -> str:
-    """Convert seconds to MM:SS (no hours, minutes can exceed 59)."""
+    """Convert seconds to MM:SS (minutes can exceed 59, no hours)."""
     total = int(round(seconds))
     minutes, secs = divmod(total, 60)
     return f"{minutes:02d}:{secs:02d}"
-
-
-def duration_to_secs(d: str) -> int:
-    """Parse HH:MM:SS or MM:SS back to total seconds."""
-    parts = d.split(":")
-    if len(parts) == 3:
-        return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
-    return int(parts[0]) * 60 + int(parts[1])
 
 
 # ──────────────────────────────────────────────
