@@ -14,10 +14,10 @@ Expected folder structure:
 """
 
 import csv
-import json
 import logging
 import os
 import platform
+import re
 import subprocess
 import sys
 import tkinter as tk
@@ -31,9 +31,10 @@ try:
 except ImportError:
     sys.exit("Error: 'mutagen' not installed. Run: pip install mutagen")
 
+FFMPEG_EXE = None
 try:
-    import static_ffmpeg
-    static_ffmpeg.add_paths()
+    from imageio_ffmpeg import get_ffmpeg_exe
+    FFMPEG_EXE = get_ffmpeg_exe()
 except ImportError:
     pass
 
@@ -142,30 +143,32 @@ def get_duration_mutagen(file_path):
     return None
 
 
-def get_duration_ffprobe(file_path):
+def get_duration_ffmpeg(file_path):
+    """Get duration using ffmpeg -i (parses Duration from stderr)."""
+    if FFMPEG_EXE is None:
+        return None
     try:
         result = subprocess.run(
-            ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", str(file_path)],
+            [FFMPEG_EXE, "-i", str(file_path)],
             capture_output=True, text=True, timeout=15,
         )
-        if result.returncode == 0:
-            info = json.loads(result.stdout)
-            dur = info.get("format", {}).get("duration")
-            if dur is not None:
-                return float(dur)
-    except (FileNotFoundError, subprocess.TimeoutExpired, json.JSONDecodeError, ValueError):
+        match = re.search(r'Duration:\s*(\d+):(\d+):(\d[\d.]*)', result.stderr)
+        if match:
+            h, m, s = match.groups()
+            return int(h) * 3600 + int(m) * 60 + float(s)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
         pass
     return None
 
 
 def get_duration(file_path, logger=None):
-    """Try mutagen first, then ffprobe."""
+    """Try mutagen first, then ffmpeg."""
     dur = get_duration_mutagen(file_path)
     if dur is not None:
         return dur
-    dur = get_duration_ffprobe(file_path)
+    dur = get_duration_ffmpeg(file_path)
     if dur is not None and logger:
-        logger.info("    (read via ffprobe: %s)", file_path.name)
+        logger.info("    (read via ffmpeg: %s)", file_path.name)
     return dur
 
 
