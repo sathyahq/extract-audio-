@@ -1,0 +1,6 @@
+2026-03-10 07:35:41  INFO      Found 2 date folder(s)
+2026-03-10 07:35:41  INFO        Date 5 | 22 Steeplechase Way  (2 files)
+2026-03-10 07:35:41  INFO          rec1.wav  ->  01:05
+2026-03-10 07:35:41  INFO          rec2.wav  ->  00:45
+2026-03-10 07:35:41  INFO        Date 12 | 456 Oak Avenue  (1 files)
+2026-03-10 07:35:41  INFO          session.wav  ->  02:05
